@@ -27,3 +27,29 @@ services:
       /usr/bin/mc mb local_minio/gold-layer --ignore-existing;
       exit 0;
       "
+  # --- QUERY ENGINE (SQL) ---
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino_server
+    ports:
+      - "8089:8080" # 8089 no seu PC -> 8080 interna (evita conflito com Airflow)
+    volumes:
+      - ./include/trino/catalog:/etc/trino/catalog
+    networks:
+      - airflow
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # --- VISUALIZATION (BI) ---
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase_ui
+    depends_on:
+      - trino
+    ports:
+      - "3000:3000"
+    networks:
+      - airflow
+
