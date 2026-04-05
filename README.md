@@ -21,6 +21,7 @@ The pipeline ingests brewery data from the [Open Brewery DB API](https://www.ope
   - [Gold Layer](#gold-layer)
 - [Data Quality](#data-quality)
 - [Querying with Trino + Metabase](#querying-with-trino--metabase)
+- [Tests](#tests)
 - [Monitoring & Alerting](#monitoring--alerting)
 - [Service Access](#service-access)
 - [AI Diligence Statement](#ai-diligence-statement)
@@ -544,6 +545,123 @@ ORDER BY country, state_province, quantity DESC;
 ```
 
 ---
+
+---
+
+## Tests
+
+The test suite covers all pipeline components — Hook, Bronze, Silver, and Gold operators — with no external dependencies. Every test uses mocked S3 and HTTP calls, so they run offline without MinIO or the Airflow metadata database.
+
+**61 tests across 4 files:**
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_open_brewery_hook.py` | 9 | Pagination stop conditions, 4xx fast-fail, connection error retry, timeout retry |
+| `test_s3_bronze_operator.py` | 13 | Audit columns, S3 key format, upload called, empty API error, bucket name |
+| `test_s3_silver_operator.py` | 20 | Type casting, string normalisation, null handling, deduplication, quality checks, partition write |
+| `test_s3_gold_operator.py` | 19 | Partition key parsing, aggregation correctness, row-count validation, S3 write, Parquet round-trip |
+
+The project uses a `pytest.ini` at the root that configures `pythonpath`, `testpaths`, and coverage reporting automatically — no extra flags needed.
+
+```ini
+[pytest]
+pythonpath  = . dags
+testpaths   = tests
+addopts     = -v --tb=short --cov=dags --cov-report=term-missing --cov-report=html
+python_files    = test_*.py
+python_classes  = Test*
+python_functions = test_*
+```
+
+---
+
+### Option 1 — Virtual environment (isolated, no Docker required)
+
+Recommended when you want to run tests quickly without starting the full Astro stack.
+
+**Create and activate the virtual environment:**
+
+```bash
+# From the project root
+python -m venv .venv
+
+# macOS / Linux
+source .venv/bin/activate
+
+# Windows
+.venv\Scripts\activate
+```
+
+**Install dependencies:**
+
+```bash
+pip install -r requirements.txt
+pip install pytest pytest-mock pytest-cov
+```
+
+**Run the tests:**
+
+```bash
+# Full suite with coverage
+pytest
+
+# Specific file
+pytest tests/test_s3_silver_operator.py
+
+# Specific class
+pytest tests/test_s3_silver_operator.py::TestNormalizeStringColumns
+
+# Single test
+pytest tests/test_s3_silver_operator.py::TestNormalizeStringColumns::test_invalid_brewery_type_becomes_nan
+
+# Quiet output (just pass/fail summary)
+pytest -q
+```
+
+**Deactivate when done:**
+
+```bash
+deactivate
+```
+
+---
+
+### Option 2 — Inside Astro CLI (matches your Docker environment exactly)
+
+Recommended before submitting or when debugging environment-specific issues. This runs tests inside the same Docker image your Airflow workers use, so dependency versions are identical to production.
+
+```bash
+# Start the stack if not already running
+astro dev start
+
+# Run the full suite inside the running container
+astro dev run pytest tests/ -v
+
+# Run a specific file
+astro dev run pytest tests/test_s3_gold_operator.py -v
+
+# Run with coverage
+astro dev run pytest tests/ --cov=dags --cov-report=term-missing
+```
+
+> **Why this matters:** Airflow 3.x introduced `__setattr__` guards on `BaseOperator` that block attribute assignment on uninitialized instances. Running tests inside the Astro container guarantees you catch these version-specific behaviours before they reach a real environment.
+
+---
+
+### Coverage report
+
+After running with `--cov-report=html` (included in `pytest.ini` by default), open the HTML report:
+
+```bash
+# macOS
+open htmlcov/index.html
+
+# Linux
+xdg-open htmlcov/index.html
+
+# Windows
+start htmlcov/index.html
+```
 
 ## Monitoring & Alerting
 
