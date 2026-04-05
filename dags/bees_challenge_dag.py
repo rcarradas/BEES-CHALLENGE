@@ -69,7 +69,7 @@ __doc__md = """
 from datetime import datetime, timedelta
 
 from airflow.models import DAG
-from  airflow.providers.standard.operators.empty.EmptyOperator
+from  airflow.providers.standard.operators.empty import EmptyOperator
 
 from plugins.operators.s3_bronze_operator import S3BronzeOperator
 from plugins.operators.s3_silver_operator import S3SilverOperator

@@ -25,7 +25,8 @@ Note:
 import logging
 
 import boto3
-from airflow.sdk.bases.hook.BaseHook'
+from airflow.hooks.base import BaseHook
+
 
 logger = logging.getLogger(__name__)
 

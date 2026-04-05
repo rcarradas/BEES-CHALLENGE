@@ -31,7 +31,7 @@ import time
 from typing import Any, Dict, List
 
 import requests
-from airflow.sdk.bases.hook.BaseHook import BaseHook
+from airflow.hooks.base import BaseHook
 
 from plugins.utils.constants import API_TIMEOUT
 
