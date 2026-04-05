@@ -273,7 +273,7 @@ flowchart LR
 - **No transformations** — data lands exactly as the API returns it (bronze principle)
 - **Audit columns added:** `_ingested_at`, `_source`, `_dag_id`, `_dag_run_id`, `_logical_date`
 - **Partition by `ingestion_date`** — infrastructure concern only, not a business column
-- **`replace=False`** — bronze is an immutable historical record; re-runs produce new timestamped files
+- **Immutable by design** — `_build_s3_key()` encodes a UTC timestamp in the filename (`YYYYMMDDTHHMMSSz.parquet`), so every run produces a unique S3 key and nothing is ever overwritten
 - **`engine="pyarrow"` explicit** — prevents encoding corruption on non-ASCII characters (e.g. Austrian state names) that occurs when pandas silently falls back to `fastparquet`
 - **In-memory `BytesIO` buffer** — no temp files on disk; safe for ephemeral containerised workers
 
@@ -296,7 +296,7 @@ flowchart TD
     --> DEDUP["_deduplicate\ndrop_duplicates by id\nkeep=last"]
     --> AUDIT["_audit_columns\n_silver_processed_at\n_silver_dag_run_id"]
     --> DQ["_data_quality_checks\nempty check\nduplicate id check"]
-    --> WRITE["_write_silver\ngroupby country + state_province\none Parquet per partition\nreplace=True"]
+    --> WRITE["_write_silver\ngroupby country + state_province\none Parquet per partition\nS3 last-write-wins overwrite"]
     --> OUT["silver-layer/\ncountry=X/state_province=Y/\nYYYY-MM-DD.parquet"]
 
     style DQ fill:#ff9999,color:#000
@@ -316,7 +316,7 @@ flowchart TD
 | Deduplication | `drop_duplicates(subset=["id"], keep="last")` | Guards against re-ingestion producing duplicate records |
 | Partition key sanitisation | `unicodedata.normalize` + ASCII encode + `re.sub` | Prevents S3 path issues from special characters (`ö→o`, spaces→`_`) |
 | Partition by `country + state_province` | Hive-style directories | Enables partition pruning in Trino/Athena for location-based queries; `country` as top level prevents `state_province` collisions across countries (e.g. "Victoria" AU vs "Victoria" CA) |
-| `replace=True` | Silver files overwritten on rerun | Silver is reprocessable — a bug fix rerun should replace bad data cleanly |
+| S3 last-write-wins | Silver files overwritten on rerun | boto3 `upload_fileobj` overwrites the same key silently — no flag needed. Re-running the DAG for the same `logical_date` replaces the previous output cleanly |
 
 ---
 
@@ -333,7 +333,7 @@ flowchart TD
     --> READ["_read_and_union_silver\nRead each partition\nRestore country + state_province from path\npd.concat all frames"]
     --> AGG["_aggregate\ngroupby country + state_province + brewery_type\nagg quantity = count(id)\nsort country → state → quantity desc"]
     --> VALIDATE["_validate\nempty check\nquantity > 0\nsum(quantity) == total silver rows"]
-    --> WRITE["_write_gold\nSingle Parquet file\nno partitioning\nreplace=True"]
+    --> WRITE["_write_gold\nSingle Parquet file\nno partitioning\nS3 last-write-wins overwrite"]
     --> OUT["gold-layer/\nopenbreweries/breweries/\nYYYY-MM-DD.parquet"]
 
     style VALIDATE fill:#ff9999,color:#000
@@ -738,7 +738,7 @@ The local Modern Data Stack setup (MinIO + Trino + Metabase) was researched and 
 - Setting up Hive-style partition syncing via `CALL minio.system.sync_partition_metadata`
 
 **As an architecture advisor:**
-Design decisions including the Hook/Operator separation rationale, why `BytesIO` is preferred over temp files in containerised workers, why bronze uses `replace=False` while silver and gold use `replace=True`, and the partition column reconstruction strategy in the gold layer were all developed through dialogue with Claude.
+Design decisions including the Hook/Operator separation rationale, why `BytesIO` is preferred over temp files in containerised workers, why bronze immutability is enforced via timestamped filenames while silver and gold rely on S3 last-write-wins semantics for idempotent reruns, and the partition column reconstruction strategy in the gold layer were all developed through dialogue with Claude.
 
 ---
 
